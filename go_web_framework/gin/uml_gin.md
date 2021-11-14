@@ -8,7 +8,7 @@ interface gin.Render {
     Render(http.ResonseWriter)
     WriteContentType(http.ResponseWriter)
 }
-gin.Render --> http.ResponseWriter
+gin.Render ..> http.ResponseWriter
 class gin.JSON {}
 class gin.HTML {}
 class gin.XX_Render {}

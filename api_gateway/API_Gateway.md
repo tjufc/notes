@@ -4,6 +4,7 @@
   - [典型案例](#典型案例)
   - [百度BFE](#百度bfe)
     - [概述](#概述-1)
+    - [源码结构梳理](#源码结构梳理)
     - [规则](#规则)
     - [插件机制](#插件机制)
     - [限流](#限流)
@@ -56,10 +57,52 @@
   + 控制系统：自动化、智能化。云原生化。
 + 负载均衡：四层负载均衡(BGW) VS 七层负载均衡(BFE)
 
-<div align=center><img src="./百度的负载均衡架构.png" height=60% width=70%></div>
+<div align=center><img src="./bfe/百度的负载均衡架构.png" height=60% width=70%></div>
 <center style="font-size:14px">百度的负载均衡架构</center>
 
+### 源码结构梳理
+
+<div align=center><img src="./bfe/uml_bfe_server.png" height=100% width=100%></div>
+<center style="font-size:14px">bfe源码结构</center>
+
++ [请求处理流程及响应](https://github.com/baidu/bfe-book/blob/version1/implementation/life_of_a_request/life_of_a_request.md) 一节
++ `BfeServer`顶层对象
+  + `BfeServer`对应一个监听协程，每个监听协程针对每个请求开启1个处理协程。单个bfe进程可以配置多个`BfeServer`。
+  + `BfeServer`通过`WaitGroup`控制请求处理协程，并实现优雅重启。
+  + `Serve()`方法负责执行整个请求处理及响应。其中，`conn`对象负责实现基础网络功能，`ReverseProxy`对象负责实现路由、负载均衡等核心功能。完整流程详见[请求处理流程及响应](https://github.com/baidu/bfe-book/blob/version1/implementation/life_of_a_request/life_of_a_request.md)一节。
+  + `BfeServer`依赖回调框架能力(`bfe_module`包)，注册并顺序执行回调链，实现请求的定制化处理。详见[模块框架](https://github.com/baidu/bfe-book/blob/version1/implementation/model_framework/model_framework.md)一节。
++ `bfe_module.BfeCallback`负责实现回调框架。
+  + BFE核心功能的实现形式被叫做回调。该模块定义了回调的统一UI(5个回调接口)。回调框架用于管理这些回调。
+  + 核心概念：回调、回调点(CallbackPoint)、回调链(HandlerList)、回调(接口)类型
+  + `bfe_module.HandlerList`内表示回调类型的类型成员事实上并没有什么用。回调接口类型是通过`switch type {}`动态判断的。
+
 ### 规则
+
+规则示例：以下是一个rewrite配置。
+```json
+{
+    "Version": "1",
+    "Config": {
+        "example_product": [
+            {
+                "Cond": "req_path_prefix_in(\"/rewrite\", false)",
+                "Actions": [
+                    {
+                        "Cmd": "PATH_PREFIX_ADD",
+                        "Params": [
+                            "/bfe/"
+                        ]
+                    }
+                ],
+                "Last": true
+            }
+        ]
+    }
+}
+```
+
+> 上述配置为产品线example_product中增加了一个规则：对满足条件"Cond"的请求，执行"Actions"动作（包含动作名"Cmd"和对应的参数），如果"Last"为true，停止执行后续动作，否则继续匹配下一条规则。
+> 最终，该规则将修改Path为/rewrite开头的请求，为其增加路径前缀/bfe/，也就是将Path从/rewrite变为/bfe/rewrite。
 
 ### 插件机制
 
@@ -75,7 +118,7 @@
 
 ### 概述
 
-<div align=center><img src="./美团API网关整体架构.jpeg"></div>
+<div align=center><img src="./meituan/美团API网关整体架构.jpeg"></div>
 <center style="font-size:14px">美团API网关整体架构</center>
 
 如图，整体架构主要包括2个部分：
@@ -97,7 +140,7 @@
 <div align=center><img src="./Oceanus策略查询设计.png"></div>
 <center style="font-size:14px">Oceanus策略查询设计</center>
 
-<div align=center><img src="./Oceanus策略规则设计.png"></div>
+<div align=center><img src="./meituan/Oceanus策略规则设计.png"></div>
 <center style="font-size:14px">Oceanus策略规则设计</center>
 
 **Shepherd**
