@@ -31,8 +31,10 @@
 
 我们看到源码的结构非常简单，基本功能全在gin包内。
 
-<div align=center><img src="./uml_gin.png" height=100% width=100%></div>
-<center style="font-size:14px">gin源码结构</center>
+<div align=center>
+  <img src="./uml_gin.png" height=100% width=100%>
+  <div style="font-size:14px">gin源码结构</div>
+</div>
 
 + `Engine`对象：框架的统一入口，提供路由注册、组装中间件、运行服务等UI。
 + `Context`对象：负责单个请求上下文完整生命周期的管理，包括接收、存储、读写和渲染。它和`Engine`是多对一的聚合关系。

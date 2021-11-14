@@ -58,7 +58,7 @@
 + 负载均衡：四层负载均衡(BGW) VS 七层负载均衡(BFE)
 
 <div align=center>
-  <img src="./bfe/百度的负载均衡架构.png" height=30% width=30%>
+  <img src="./bfe/百度的负载均衡架构.png" height=40% width=40%>
   <div style="font-size:14px">百度的负载均衡架构</div>
 </div>
 
@@ -122,8 +122,11 @@
 
 ### 概述
 
-<div align=center><img src="./meituan/美团API网关整体架构.jpeg"></div>
-<center style="font-size:14px">美团API网关整体架构</center>
+<div align=center>
+  <img src="./meituan/美团API网关整体架构.jpeg">
+  <div style="font-size:14px">美团API网关整体架构</div>
+</div>
+
 
 如图，整体架构主要包括2个部分：
 
@@ -141,11 +144,16 @@
 + 策略规则设计：`condition`支持简单的规则引擎。
 + 策略更新：使用worker进程间的共享内存，定时更新。
 
-<div align=center><img src="./meituan/Oceanus策略查询设计.png"></div>
-<center style="font-size:14px">Oceanus策略查询设计</center>
+<div align=center>
+  <img src="./meituan/Oceanus策略查询设计.png">
+  <div style="font-size:14px">Oceanus策略查询设计</div>
+</div>
 
-<div align=center><img src="./meituan/Oceanus策略规则设计.png"></div>
-<center style="font-size:14px">Oceanus策略规则设计</center>
+
+<div align=center>
+  <img src="./meituan/Oceanus策略规则设计.png">
+  <div style="font-size:14px">Oceanus策略规则设计</div>
+</div>
 
 **Shepherd**
 
