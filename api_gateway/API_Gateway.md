@@ -57,13 +57,17 @@
   + 控制系统：自动化、智能化。云原生化。
 + 负载均衡：四层负载均衡(BGW) VS 七层负载均衡(BFE)
 
-<div align=center><img src="./bfe/百度的负载均衡架构.png" height=30% width=30%></div>
-<center style="font-size:14px">百度的负载均衡架构</center>
+<div align=center>
+  <img src="./bfe/百度的负载均衡架构.png" height=30% width=30%>
+  <div style="font-size:14px">百度的负载均衡架构</div>
+</div>
 
 ### 源码结构梳理
 
-<div align=center><img src="./bfe/uml_bfe_server.png" height=100% width=100%></div>
-<center style="font-size:14px">bfe源码结构</center>
+<div align=center>
+  <img src="./bfe/uml_bfe_server.png" height=100% width=100%>
+  <div style="font-size:14px">bfe源码结构</div>
+</div>
 
 + [请求处理流程及响应](https://github.com/baidu/bfe-book/blob/version1/implementation/life_of_a_request/life_of_a_request.md) 一节
 + `BfeServer`顶层对象
