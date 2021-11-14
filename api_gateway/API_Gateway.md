@@ -57,7 +57,7 @@
   + 控制系统：自动化、智能化。云原生化。
 + 负载均衡：四层负载均衡(BGW) VS 七层负载均衡(BFE)
 
-<div align=center><img src="./bfe/百度的负载均衡架构.png" height=60% width=70%></div>
+<div align=center><img src="./bfe/百度的负载均衡架构.png" height=30% width=30%></div>
 <center style="font-size:14px">百度的负载均衡架构</center>
 
 ### 源码结构梳理
@@ -137,7 +137,7 @@
 + 策略规则设计：`condition`支持简单的规则引擎。
 + 策略更新：使用worker进程间的共享内存，定时更新。
 
-<div align=center><img src="./Oceanus策略查询设计.png"></div>
+<div align=center><img src="./meituan/Oceanus策略查询设计.png"></div>
 <center style="font-size:14px">Oceanus策略查询设计</center>
 
 <div align=center><img src="./meituan/Oceanus策略规则设计.png"></div>
