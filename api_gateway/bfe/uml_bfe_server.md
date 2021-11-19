@@ -1,116 +1,156 @@
 ```plantuml
 @startuml
 
-class bfe_server.BfeServer {
-    Config bfe_conf.BfeConfig
-    connWaitGroup sync.WaitGroup
 
-    Serve(l net.Listerner, ...)
-    findProduct(Request) error
-}
-bfe_server.BfeServer "1" *--> "n" bfe_server.conn
-bfe_server.BfeServer *--> bfe_server.ReverseProxy
-bfe_server.BfeServer --> bfe_module.BfeCallbacks
+package bfe_server {
+    class BfeServer {
+        Config bfe_conf.BfeConfig
+        connWaitGroup sync.WaitGroup
+        ServerConf *bfe_route.ServerDataConf
 
-class bfe_server.conn {
-    server *BfeServer
-    remoteAddr string
-    rwc net.Conn
+        Serve(l net.Listerner, ...)
+        findProduct(Request) error
+    }
+    BfeServer "1" *--> "n" conn
+    BfeServer *--> ReverseProxy
+    BfeServer o--> bfe_module.BfeCallbacks
+    BfeServer o--> bfe_route.ServerDataConf
 
-    serve()
-}
-bfe_server.conn ..> bfe_server.ReverseProxy
+    class conn {
+        server *BfeServer
+        remoteAddr string
+        rwc net.Conn
 
-class bfe_server.ReverseProxy {
-    server *BfeServer
+        serve()
+    }
+    conn ..> ReverseProxy
 
-    ServeHTTP(ResponseWriter, Request)
-    FinishReq(ResponseWriter, Request)
-}
-bfe_server.ReverseProxy ..> bfe_http.ResponseWriter
-bfe_server.ReverseProxy ..> bfe_http.Request
-bfe_server.ReverseProxy ..> bfe_module.HandlerList
+    class ReverseProxy {
+        server *BfeServer
 
-
-
-class bfe_http.ResponseWriter {}
-class bfe_http.Request {}
-
-
-
-class bfe_module.BfeCallbacks {
-    callbacks map[CallbackPoint]*HandlerList
-
-    GetHandlerList(point CallbackPoint)
-}
-bfe_module.BfeCallbacks --> bfe_module.CallbackPoint
-bfe_module.BfeCallbacks --> bfe_module.HandlerList
-
-enum bfe_module.CallbackPoint {
-    HandleAccept
-    HandleHandshake
-    HandleFoundProduct
-    HandleAfterLocation
-    HandleForward
-    HandleReadResponse
-    HandleRequestFinish
-    HandleFinish
+        ServeHTTP(ResponseWriter, Request)
+        FinishReq(ResponseWriter, Request)
+    }
+    ReverseProxy ..> bfe_http.ResponseWriter
+    ReverseProxy ..> bfe_http.Request
+    ReverseProxy ..> bfe_module.HandlerList
 }
 
-class bfe_module.HandlerList {
-    handlerType HandlersType
-    handlers *list.List
 
-    FilterRequest(Request) (int, Response)
-    FilterResponse(Request) int
-    FilterAccept(Session) int
-    FilterForward(Request) int
-    FilterFinish(Session) int
-}
-bfe_module.HandlerList --> bfe_module.HandlersType
-bfe_module.HandlerList "1" --> "n" bfe_module.RequestFilter
-bfe_module.HandlerList "1" --> "n" bfe_module.ResponseFilter
-bfe_module.HandlerList "1" --> "n" bfe_module.AcceptFilter
-bfe_module.HandlerList "1" --> "n" bfe_module.ForwardFilter
-bfe_module.HandlerList "1" --> "n" bfe_module.FinishFilter
-bfe_module.HandlerList ..> bfe_module.HandlerReturnType
-
-enum bfe_module.HandlersType {
-    HandlersAccept
-    HandlersRequest
-    HandlersForward
-    HandlersResponse
-    HandlersFininsh
+package bfe_http {
+    class ResponseWriter {}
+    class Request {}
 }
 
-interface bfe_module.RequestFilter {
-    FilterRequest(Request) (int, Response)
-}
-bfe_module.RequestFilter --> bfe_module.HandlerReturnType
-interface bfe_module.ResponseFilter {
-    FilterResponse(Request) int
-}
-bfe_module.ResponseFilter --> bfe_module.HandlerReturnType
-interface bfe_module.AcceptFilter {
-    FilterAccept(Session) int
-}
-bfe_module.AcceptFilter --> bfe_module.HandlerReturnType
-interface bfe_module.ForwardFilter {
-    FilterForward(Request) int
-}
-bfe_module.ForwardFilter --> bfe_module.HandlerReturnType
-interface bfe_module.FinishFilter {
-    FilterFinish(Session) int
-}
-bfe_module.FinishFilter --> bfe_module.HandlerReturnType
 
-enum bfe_module.HandlerReturnType {
-    BfeHandlerFinish
-    BfeHandlerGoOn
-    BfeHandlerRedirect
-    BfeHandlerResponse
-    BfeHandlerClose
+package bfe_module {
+    class BfeCallbacks {
+        callbacks map[CallbackPoint]*HandlerList
+
+        GetHandlerList(point CallbackPoint)
+    }
+    BfeCallbacks --> CallbackPoint
+    BfeCallbacks "1" o--> "n" HandlerList
+
+    enum CallbackPoint {
+        HandleAccept
+        HandleHandshake
+        HandleFoundProduct
+        HandleAfterLocation
+        HandleForward
+        HandleReadResponse
+        HandleRequestFinish
+        HandleFinish
+    }
+
+    class HandlerList {
+        handlerType HandlersType
+        handlers *list.List
+
+        FilterRequest(Request) (int, Response)
+        FilterResponse(Request) int
+        FilterAccept(Session) int
+        FilterForward(Request) int
+        FilterFinish(Session) int
+    }
+    HandlerList --> HandlersType
+    HandlerList "1" --> "n" RequestFilter
+    HandlerList "1" --> "n" ResponseFilter
+    HandlerList "1" --> "n" AcceptFilter
+    HandlerList "1" --> "n" ForwardFilter
+    HandlerList "1" --> "n" FinishFilter
+    HandlerList ..> HandlerReturnType
+
+    enum HandlersType {
+        HandlersAccept
+        HandlersRequest
+        HandlersForward
+        HandlersResponse
+        HandlersFininsh
+    }
+
+    interface RequestFilter {
+        FilterRequest(Request) (int, Response)
+    }
+    RequestFilter --> HandlerReturnType
+    interface ResponseFilter {
+        FilterResponse(Request) int
+    }
+    ResponseFilter --> HandlerReturnType
+    interface AcceptFilter {
+        FilterAccept(Session) int
+    }
+    AcceptFilter --> HandlerReturnType
+    interface ForwardFilter {
+        FilterForward(Request) int
+    }
+    ForwardFilter --> HandlerReturnType
+    interface FinishFilter {
+        FilterFinish(Session) int
+    }
+    FinishFilter --> HandlerReturnType
+
+    enum HandlerReturnType {
+        BfeHandlerFinish
+        BfeHandlerGoOn
+        BfeHandlerRedirect
+        BfeHandlerResponse
+        BfeHandlerClose
+    }
 }
+
+
+package bfe_route {
+    class ServerDataConf {
+        HostTable *HostTable
+        ClusterTable *ClusterTable
+    }
+    ServerDataConf o--> HostTable
+    ServerDataConf o--> ClusterTable
+
+    package trie {
+        class trie.Trie {
+            Children trieChildren
+        }
+        trie.Trie *--> trie.Trie
+    }
+
+    class HostTable {
+        hostTrie *trie.Trie
+    }
+    HostTable --> trie.Trie
+
+    class ClusterTable {
+        clusterTable ClusterMap
+    }
+    ClusterTable "1" o--> "n" bfe_cluster.BfeCluster
+}
+
+
+package bfe_cluster {
+    class BfeCluster {}
+}
+
 
 @enduml
 ```

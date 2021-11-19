@@ -5,6 +5,7 @@
   - [百度BFE](#百度bfe)
     - [概述](#概述-1)
     - [源码结构梳理](#源码结构梳理)
+    - [流量转发](#流量转发)
     - [规则](#规则)
     - [插件机制](#插件机制)
     - [限流](#限流)
@@ -22,7 +23,7 @@
 [refer](https://www.nginx.com/learn/api-gateway/)
 
 > An API gateway is the conductor that organizes the requests being processed by the microservices architecture to create a simplified experience for the user. 面向微服务。
-> It’s a translator, taking a client’s many requests and turning them into just one, to reduce the number of round trips between the client and application. 这个“把多个API聚合成一个API”，具体是怎么实现的？
+> It’s a translator, taking a client’s many requests and turning them into just one, to reduce the number of round trips between the client and application. 服务(接口？)编排能力。
 > An API gateway is set up in front of the microservices and becomes the entry point for every new request being executed by the app. It simplifies both the client implementations and the microservices app. 接入层。
 
 ![](./apigateway.jpeg)
@@ -69,7 +70,7 @@
   <div style="font-size:14px">bfe源码结构</div>
 </div>
 
-+ [请求处理流程及响应](https://github.com/baidu/bfe-book/blob/version1/implementation/life_of_a_request/life_of_a_request.md) 一节
+
 + `BfeServer`顶层对象
   + `BfeServer`对应一个监听协程，每个监听协程针对每个请求开启1个处理协程。单个bfe进程可以配置多个`BfeServer`。
   + `BfeServer`通过`WaitGroup`控制请求处理协程，并实现优雅重启。
@@ -79,6 +80,9 @@
   + BFE核心功能的实现形式被叫做回调。该模块定义了回调的统一UI(5个回调接口)。回调框架用于管理这些回调。
   + 核心概念：回调、回调点(CallbackPoint)、回调链(HandlerList)、回调(接口)类型
   + `bfe_module.HandlerList`内表示回调类型的类型成员事实上并没有什么用。回调接口类型是通过`switch type {}`动态判断的。
+
+### 流量转发
+
 
 ### 规则
 
