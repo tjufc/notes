@@ -66,7 +66,7 @@
 ### 源码结构梳理
 
 <div align=center>
-  <img src="./bfe/uml_bfe_server.png" height=100% width=100%>
+  <img src="./bfe/uml_bfe.png" height=100% width=100%>
   <div style="font-size:14px">bfe源码结构</div>
 </div>
 
@@ -83,6 +83,11 @@
 
 ### 流量转发
 
+**BFE转发模型**
+
++ 租户(Tenant/Product)：大致上，一个域名对应一个租户。百度内部可能叫“产品线”。
++ 集群(Cluster)：一个租户可以对应多个集群，一个租户维护一个路由转发表。一个集群一般按照不同的IDC再划分多个子集群。
++ 实例：`ip:port`
 
 ### 规则
 

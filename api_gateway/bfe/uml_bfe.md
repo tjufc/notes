@@ -1,6 +1,32 @@
 ```plantuml
 @startuml
 
+package bfe_balance {
+    package backend {
+        class backend.BfeBackend {
+            Addr string
+            Port int 
+        }
+    }
+
+    package bal_gslb {
+        class bal_gslb.BalanceGslb {
+            name string
+            BalanceMode string
+
+            Balance(req *Request) *bal_backend.BfeBackend
+        }
+        bal_gslb.BalanceGslb ..> backend.BfeBackend
+    }
+
+    class bfe_balance.BalTable {
+        balTable map[string]*bal_gslb.BalanceGslb
+
+        Lookup(clusterName string) *bal_gslb.BalanceGslb
+    }
+    bfe_balance.BalTable o--> bal_gslb.BalanceGslb
+}
+
 
 package bfe_server {
     class BfeServer {
@@ -27,13 +53,17 @@ package bfe_server {
 
     class ReverseProxy {
         server *BfeServer
+        balTable *bfe_balance.BalTable
 
         ServeHTTP(ResponseWriter, Request)
         FinishReq(ResponseWriter, Request)
+        clusterInvoke(cluster *bfe_cluster.BfeCluster,...) *Response
     }
     ReverseProxy ..> bfe_http.ResponseWriter
     ReverseProxy ..> bfe_http.Request
     ReverseProxy ..> bfe_module.HandlerList
+    ReverseProxy o--> bfe_balance.BalTable
+    ReverseProxy ..> bal_gslb.BalanceGslb
 }
 
 
@@ -135,20 +165,62 @@ package bfe_route {
         trie.Trie *--> trie.Trie
     }
 
+    class route {
+        product string
+        tag string
+    }
+
     class HostTable {
         hostTrie *trie.Trie
+        productAdvancedRouteTable route_rule_conf.ProductAdvancedRouteRule
+
+        LookupHostTagAndProduct(req *Request)
+        LookupCluster(req *Reqeust)
+        findHostRoute(host string) route
+        findVipRoute(vip string) route
     }
     HostTable --> trie.Trie
+    HostTable "1" o--> "n" route
+    HostTable o--> bfe_config.bfe_route_conf.ProductAdvancedRouteRule
+    HostTable ..> bfe_basic.condition.Condition
+
+    package bfe_cluster {
+        class bfe_cluster.BfeCluster {
+            Name string
+            backendConf *cluster_conf.BackendBasic
+
+            BackendConf() *cluster_conf.BackendBasic
+            TimeoutReadClient() time.Duration
+            ...()
+        }
+    }
 
     class ClusterTable {
         clusterTable ClusterMap
+
+        Lookup(clusterName string) bfe_cluster.BfeCluster
     }
     ClusterTable "1" o--> "n" bfe_cluster.BfeCluster
 }
 
 
-package bfe_cluster {
-    class BfeCluster {}
+package bfe_config.bfe_route_conf {
+    class ProductAdvancedRouteRule {
+        r map[string][]AdvancedRouteRule
+    }
+    ProductAdvancedRouteRule "1" o--> "n" AdvancedRouteRule
+
+    class AdvancedRouteRule {
+        Cond condition.Condition
+    }
+    AdvancedRouteRule ..|> bfe_basic.condition.Condition
+}
+
+
+package bfe_basic.condition {
+    interface Condition {
+        Match(req *Request) bool
+    }
 }
 
 
