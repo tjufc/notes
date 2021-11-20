@@ -24,7 +24,7 @@ package bfe_balance {
 
         Lookup(clusterName string) *bal_gslb.BalanceGslb
     }
-    bfe_balance.BalTable o--> bal_gslb.BalanceGslb
+    bfe_balance.BalTable "1" o--> "n" bal_gslb.BalanceGslb
 }
 
 
