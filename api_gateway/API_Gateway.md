@@ -6,6 +6,7 @@
     - [概述](#概述-1)
     - [源码结构梳理](#源码结构梳理)
     - [流量转发](#流量转发)
+    - [模块插件机制](#模块插件机制)
     - [规则](#规则)
     - [插件机制](#插件机制)
     - [限流](#限流)
@@ -71,23 +72,67 @@
 </div>
 
 
-+ `BfeServer`顶层对象
-  + `BfeServer`对应一个监听协程，每个监听协程针对每个请求开启1个处理协程。单个bfe进程可以配置多个`BfeServer`。
-  + `BfeServer`通过`WaitGroup`控制请求处理协程，并实现优雅重启。
-  + `Serve()`方法负责执行整个请求处理及响应。其中，`conn`对象负责实现基础网络功能，`ReverseProxy`对象负责实现路由、负载均衡等核心功能。完整流程详见[请求处理流程及响应](https://github.com/baidu/bfe-book/blob/version1/implementation/life_of_a_request/life_of_a_request.md)一节。
-  + `BfeServer`依赖回调框架能力(`bfe_module`包)，注册并顺序执行回调链，实现请求的定制化处理。详见[模块框架](https://github.com/baidu/bfe-book/blob/version1/implementation/model_framework/model_framework.md)一节。
-+ `bfe_module.BfeCallback`负责实现回调框架。
-  + BFE核心功能的实现形式被叫做回调。该模块定义了回调的统一UI(5个回调接口)。回调框架用于管理这些回调。
-  + 核心概念：回调、回调点(CallbackPoint)、回调链(HandlerList)、回调(接口)类型
-  + `bfe_module.HandlerList`内表示回调类型的类型成员事实上并没有什么用。回调接口类型是通过`switch type {}`动态判断的。
+`BfeServer`顶层对象
+
++ `BfeServer`对应一个监听协程，每个监听协程针对每个请求开启1个处理协程。单个bfe进程可以配置多个`BfeServer`。
++ `BfeServer`通过`WaitGroup`控制请求处理协程，并实现优雅重启。
++ `Serve()`方法负责执行整个请求处理及响应。其中，`conn`对象负责实现基础网络功能，`ReverseProxy`对象负责实现路由、负载均衡等核心功能。完整流程详见[请求处理流程及响应](https://github.com/baidu/bfe-book/blob/version1/implementation/life_of_a_request/life_of_a_request.md)一节，代码参见`ReverseProxy.ServeHTTP()`。
++ `BfeServer`依赖回调框架能力(`bfe_module`包)，注册并顺序执行回调链，实现请求的定制化处理。
 
 ### 流量转发
 
-**BFE转发模型**
+**转发模型**
+
+参考章节：[BFE的转发模型](https://github.com/baidu/bfe-book/blob/version1/design/model/model.md)
 
 + 租户(Tenant/Product)：大致上，一个域名对应一个租户。百度内部可能叫“产品线”。
 + 集群(Cluster)：一个租户可以对应多个集群，一个租户维护一个路由转发表。一个集群一般按照不同的IDC再划分多个子集群。
 + 实例：`ip:port`
+
+**实现机制**
+
+设计为2个核心能力
+
++ [请求路由](https://github.com/baidu/bfe-book/blob/version1/implementation/routing/routing.md)：负责通过域名、Vip、path等特征，根据路由规则，获取租户->集群。代码上对应`bfe_route`包，规则的解析则依赖`bfe_route_conf`包。
++ [负载均衡](https://github.com/baidu/bfe-book/blob/version1/implementation/balancing/balancing.md)：已知下游集群的情况下，根据负载均衡策略，获取子集群->实例。代码上对应`bfe_balancer`包。
+
+**实现细节**
+
++ (根据域名)获取租户 `HostTable.findHostRoute`
+
+```go
+func (t *HostTable) findHostRoute(host string) (route, error) {
+	// ...
+	match, ok := t.hostTrie.Get(strings.Split(string_reverse.ReverseFqdnHost(hostnameStrip(host)), "."))
+	if ok {
+		// get route success, return
+		return match.(route), nil
+	}
+  // ...
+}
+```
+
+使用了一棵域名[前缀树](https://zhuanlan.zhihu.com/p/28891541)来查找，从根节点到叶子节点为一个完整域名。从根节点往下依次是各级[域名](https://baike.baidu.com/item/%E9%A1%B6%E7%BA%A7%E5%9F%9F%E5%90%8D/2152551)，到了叶子节点则是租户。
+
++ 路由规则
+
+### 模块插件机制
+
+参考章节：[模块框架](https://github.com/baidu/bfe-book/blob/version1/implementation/model_framework/model_framework.md)
+代码模块：`bfe_module`
+
+**回调模型**
+
+BFE通过*回调*来执行插件功能。
+
++ 回调框架(BfeCallbacks)
++ 回调点(CallbackPoint)
++ 回调链(HandlerList)
++ 回调(接口)类型：`RequestFilter`等5个回调接口。
+
+**实现细节**
+
++ `bfe_module.HandlerList`内表示回调类型的类型成员事实上并没有什么用。回调接口类型是通过`switch type {}`动态判断的。
 
 ### 规则
 

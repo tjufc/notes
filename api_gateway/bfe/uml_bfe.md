@@ -35,7 +35,8 @@ package bfe_server {
         ServerConf *bfe_route.ServerDataConf
 
         Serve(l net.Listerner, ...)
-        findProduct(Request) error
+        findProduct(req *Request) error
+        findCluster(req *Request) error
     }
     BfeServer "1" *--> "n" conn
     BfeServer *--> ReverseProxy
