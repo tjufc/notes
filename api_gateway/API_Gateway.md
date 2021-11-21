@@ -5,8 +5,9 @@
   - [百度BFE](#百度bfe)
     - [概述](#概述-1)
     - [源码结构梳理](#源码结构梳理)
-    - [流量转发](#流量转发)
     - [模块插件机制](#模块插件机制)
+    - [流量转发](#流量转发)
+    - [条件表达式](#条件表达式)
     - [规则](#规则)
     - [插件机制](#插件机制)
     - [限流](#限流)
@@ -79,6 +80,24 @@
 + `Serve()`方法负责执行整个请求处理及响应。其中，`conn`对象负责实现基础网络功能，`ReverseProxy`对象负责实现路由、负载均衡等核心功能。完整流程详见[请求处理流程及响应](https://github.com/baidu/bfe-book/blob/version1/implementation/life_of_a_request/life_of_a_request.md)一节，代码参见`ReverseProxy.ServeHTTP()`。
 + `BfeServer`依赖回调框架能力(`bfe_module`包)，注册并顺序执行回调链，实现请求的定制化处理。
 
+### 模块插件机制
+
+参考章节：[模块框架](https://github.com/baidu/bfe-book/blob/version1/implementation/model_framework/model_framework.md)
+代码模块：`bfe_module`
+
+**回调模型**
+
+BFE通过*回调*来执行插件功能。
+
++ 回调框架(BfeCallbacks)
++ 回调点(CallbackPoint)
++ 回调链(HandlerList)
++ 回调(接口)类型：`RequestFilter`等5个回调接口。
+
+**实现细节**
+
++ `bfe_module.HandlerList`内表示回调类型的类型成员事实上并没有什么用。回调接口类型是通过`switch type {}`动态判断的。
+
 ### 流量转发
 
 **转发模型**
@@ -114,25 +133,65 @@ func (t *HostTable) findHostRoute(host string) (route, error) {
 
 使用了一棵域名[前缀树](https://zhuanlan.zhihu.com/p/28891541)来查找，从根节点到叶子节点为一个完整域名。从根节点往下依次是各级[域名](https://baike.baidu.com/item/%E9%A1%B6%E7%BA%A7%E5%9F%9F%E5%90%8D/2152551)，到了叶子节点则是租户。
 
-+ 路由规则
+查找算法：
 
-### 模块插件机制
+```go
+func (t *Trie) Get(path []string) (entry interface{}, ok bool) {
+	// 递归终止条件
+	if len(path) == 0 {
+		return t.getEntry()
+	}
 
-参考章节：[模块框架](https://github.com/baidu/bfe-book/blob/version1/implementation/model_framework/model_framework.md)
-代码模块：`bfe_module`
+	// key是当前前缀
+	key := path[0]
+	// newPath做为递归查找的输入路径
+	newPath := path[1:]
 
-**回调模型**
+	res, ok := t.Children[key]
+	if ok {
+		// 递归查找
+		entry, ok = res.Get(newPath)
+	}
 
-BFE通过*回调*来执行插件功能。
+	// ...
+}
+```
 
-+ 回调框架(BfeCallbacks)
-+ 回调点(CallbackPoint)
-+ 回调链(HandlerList)
-+ 回调(接口)类型：`RequestFilter`等5个回调接口。
++ 获取集群 `HostTable.LookupCluster`
 
-**实现细节**
+路由规则的检查和动作执行代码如下：
 
-+ `bfe_module.HandlerList`内表示回调类型的类型成员事实上并没有什么用。回调接口类型是通过`switch type {}`动态判断的。
+```go
+// LookupCluster find clusterName with given request.
+func (t *HostTable) LookupCluster(req *bfe_basic.Request) error {
+	// match advanced route rules 获取路由规则表
+	rules, ok := t.productAdvancedRouteTable[req.Route.Product]
+	if !ok {
+		req.Route.ClusterName = ""
+		req.Route.Error = ErrNoProductRule
+		return req.Route.Error
+	}
+
+	// matching route rules 规则检查
+	for _, rule := range rules {
+		// 条件表达式描述的规则
+		if rule.Cond.Match(req) {
+			clusterName = rule.ClusterName
+			break
+		}
+	}
+
+	// ...
+}
+```
+
+可见，`productAdvancedRouteTable`中预先(显然是在server初始化阶段)注册了一些列分流条件，在这里根据请求(参数)进行逐个进行判断，直至找到符合条件的集群。
+关于分流条件的实现细节，详见[条件表达式](#条件表达式)一节。
+
+### 条件表达式
+
+参考章节：[BFE的路由转发机制—条件表达式](https://github.com/baidu/bfe-book/blob/version1/design/route/route.md)
+代码模块：`bfe_basic/condition`
 
 ### 规则
 

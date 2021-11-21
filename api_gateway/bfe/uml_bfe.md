@@ -1,6 +1,134 @@
 ```plantuml
 @startuml
 
+
+package bfe_basic {
+    package condition {
+        package parser {
+            class parser.Parser {
+                lexer *condLex
+                scanner Scanner
+                ast Node
+
+                Parse()
+            }
+            parser.Parser o--> parser.Node
+            parser.Parser o--> parser.Scanner
+            parser.Parser o--> parser.condLex
+
+            class parser.Scanner {
+                src []byte
+            }
+
+            class parser.condLex {
+                s *Scanner
+            }
+            parser.condLex o--> parser.Scanner
+
+            interface parser.Node {
+                Pos() token.Pos
+                End() token.Pos
+            }
+
+            class parser.CallExpr {
+                Fun *Ident
+                Args BasicLitList
+            }
+            parser.CallExpr ..|> parser.Node
+
+            class parser.BinaryExpr {
+                Op Token
+                X Node
+                Y Node
+            }
+            parser.BinaryExpr ..|> parser.Node
+
+            class parser.UnaryExpr {
+                Op Token
+                X Node
+            }
+            parser.UnaryExpr ..|> parser.Node
+        }
+
+        interface condition.Condition {
+            Match(req *Request) bool
+        }
+
+        class condition.BinaryCond {
+            op parser.Token
+            lc Condition
+            rc Condition
+        }
+        condition.BinaryCond ..|> condition.Condition
+
+        class condition.UnaryCond {
+            op parser.Token
+            cond Condition
+        }
+        condition.UnaryCond ..|> condition.Condition
+
+        interface condition.Fetcher {
+            Fetch(req *Request) interface{}
+        }
+        interface condition.Matcher {
+            Match(req *Reqeust) bool
+        }
+        class condition.PrimitiveCond {
+            name string
+            node *parser.CallExpr
+            fetcher Fetcher
+            matcher Matcher
+        }
+        condition.PrimitiveCond ..|> condition.Condition
+        condition.PrimitiveCond o--> condition.Fetcher
+        condition.PrimitiveCond o--> condition.Matcher
+
+
+        interface condition.Build {
+            Build(condStr string) Condition
+        }
+        condition.Build --> parser.Parser
+        condition.Build o--> condition.buildBinary
+        condition.Build o--> condition.buildUnary
+        condition.Build o--> condition.buildPrimitive
+
+        interface condition.buildBinary {
+            buildPrimitive(node *parser.CallExpr) Condition
+        }
+        condition.buildBinary ..> parser.BinaryExpr
+        condition.buildBinary ..> condition.BinaryCond
+
+        interface condition.buildUnary {
+            buildUnary(node *parser.UnaryExpr) Condition
+        }
+        condition.buildUnary ..> parser.UnaryExpr
+        condition.buildUnary ..> condition.UnaryCond
+
+        interface condition.buildPrimitive {
+            buildPrimitive(node *parser.CallExpr) Condition
+        }
+        condition.buildPrimitive ..> parser.CallExpr
+        condition.buildPrimitive ..> condition.PrimitiveCond
+    }
+}
+
+
+package bfe_config {
+    package bfe_route_conf {
+        class bfe_route_conf.ProductAdvancedRouteRule {
+            r map[string][]AdvancedRouteRule
+        }
+        bfe_route_conf.ProductAdvancedRouteRule "1" o--> "n" bfe_route_conf.AdvancedRouteRule
+
+        class bfe_route_conf.AdvancedRouteRule {
+            Cond condition.Condition
+            ClusterName string
+        }
+        bfe_route_conf.AdvancedRouteRule ..|> condition.Condition
+    }
+}
+
+
 package bfe_balance {
     package backend {
         class backend.BfeBackend {
@@ -182,8 +310,8 @@ package bfe_route {
     }
     HostTable --> trie.Trie
     HostTable "1" o--> "n" route
-    HostTable o--> bfe_config.bfe_route_conf.ProductAdvancedRouteRule
-    HostTable ..> bfe_basic.condition.Condition
+    HostTable o--> bfe_route_conf.ProductAdvancedRouteRule
+    HostTable ..> condition.Condition
 
     package bfe_cluster {
         class bfe_cluster.BfeCluster {
@@ -202,26 +330,6 @@ package bfe_route {
         Lookup(clusterName string) bfe_cluster.BfeCluster
     }
     ClusterTable "1" o--> "n" bfe_cluster.BfeCluster
-}
-
-
-package bfe_config.bfe_route_conf {
-    class ProductAdvancedRouteRule {
-        r map[string][]AdvancedRouteRule
-    }
-    ProductAdvancedRouteRule "1" o--> "n" AdvancedRouteRule
-
-    class AdvancedRouteRule {
-        Cond condition.Condition
-    }
-    AdvancedRouteRule ..|> bfe_basic.condition.Condition
-}
-
-
-package bfe_basic.condition {
-    interface Condition {
-        Match(req *Request) bool
-    }
 }
 
 
