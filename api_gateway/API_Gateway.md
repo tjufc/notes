@@ -192,6 +192,53 @@ func (t *HostTable) LookupCluster(req *bfe_basic.Request) error {
 
 参考章节：[BFE的路由转发机制—条件表达式](https://github.com/baidu/bfe-book/blob/version1/design/route/route.md)
 代码模块：`bfe_basic/condition`
+背景知识：[AST(抽象语法树)](https://juejin.cn/post/6844904035271573511)
+
+**实现机制**
+
+如书中所述：
+
+> 条件表达式在BFE的内部数据结构，是一个中缀表达式形式的二叉树。二叉树的非叶子节点代表了操作符。叶子节点代表条件原语。
+
+<div align=center>
+  <img src="./bfe/BFE条件表达式.png" height=80% width=80%>
+  <div style="font-size:14px">BFE条件表达式实现机制</div>
+</div>
+
+条件表达式对于用户相当于一套语言，底层引擎需要支持对这套语言的*编译*(*解释*)。这类问题往往通过AST来解决。
+
+条件表达式的编译流程实现：
+
+```go
+func Build(condStr string) (Condition, error) {
+	// 词法解析&语法解析，生成语法树
+	node, identList, err := parser.Parse(condStr)
+	if err != nil {
+		return nil, err
+	}
+
+	// ...
+
+	// 构建执行树
+	return build(node)
+}
+```
+
+主要包括2个步骤：
+
++ 词法解析&语法解析，生成语法树。以下简称*分析*
++ 构建执行树。以下简称*生成*
+
+这棵AST的节点被分为了3类：
+
++ **叶子节点——原语**：这类节点包含可以直接执行的*条件原语*。*分析*环节中将节点实例化为`parser.CallExpr`类型；*生成*环节实例化为`condition.PrimitiveCond`类型。
++ **叶子结点—一元运算**：这类节点需要在*条件原语*的基础上，进行一次一元逻辑运算，例如：`非`。*分析*环节对应`parser.UnaryExpr`，*生成*环节对应`condition.UnaryCond`。
++ **非叶子结点**：这类节点需要对左右2个子节点，进行一次二元逻辑运算，例如：`与/或/非`。*分析*环节中实例化为`parser.BinaryExpr`，*生成*环节中实例化为`parser.BinaryCond`。
+
+**实现细节**
+
++ `parser`包*分析*部分的代码看起来像是基于`go`包改造的。
++ *条件原语*的实现：`condition.PrimitiveCond`又被拆分成`Matcher`和`Fetcher`的组合，它们分别负责参数的获取和匹配。这样可以方便将已有的对象迅速组合出新的原语。
 
 ### 规则
 
