@@ -82,8 +82,15 @@
 
 ### 模块插件机制
 
-参考章节：[模块框架](https://github.com/baidu/bfe-book/blob/version1/implementation/model_framework/model_framework.md)
-代码模块：`bfe_module`
+**准备**
+
++ 参考章节：
+  + [模块插件机制](https://github.com/baidu/bfe-book/blob/version1/design/module/module.md)
+  + [模块框架](https://github.com/baidu/bfe-book/blob/version1/implementation/model_framework/model_framework.md)
+  + [如何开发BFE扩展模块](https://github.com/baidu/bfe-book/blob/version1/develop/how_to_write_module/how_to_write_module.md)
++ 代码模块
+  + `bfe_module`
+  + `bfe_modules`、`bfe_modules.mod_waf`
 
 **回调模型**
 
@@ -91,8 +98,149 @@ BFE通过*回调*来执行插件功能。
 
 + 回调框架(BfeCallbacks)
 + 回调点(CallbackPoint)
-+ 回调链(HandlerList)
++ 回调链(HandlerList)：实现上是个链表。
 + 回调(接口)类型：`RequestFilter`等5个回调接口。
++ 回调返回类型(没定义，暂且称之为HandlerReturnType)
+
+以下是`ReverseProxy.ServeHTTP`请求处理流程中，某个回调点的代码：
+
+```go
+	// ...
+
+	// Callback for HandleBeforeLocation
+	// srv.CallBacks是回调框架BfeCallbacks对象
+	// 获取回调点HandleBeforeLocation对应的回调链
+	hl = srv.CallBacks.GetHandlerList(bfe_module.HandleBeforeLocation)
+	if hl != nil {
+		// 依次执行回调(函数)
+		// 逻辑上，在特定回调点有特定的回调(接口)类型
+		retVal, res = hl.FilterRequest(basicReq)
+		basicReq.HttpResponse = res
+		// 根据回调返回类型进行处理
+		switch retVal {
+		case bfe_module.BfeHandlerClose:
+			// close the connection directly (with no response)
+			action = closeDirectly
+			return
+		case bfe_module.BfeHandlerFinish:
+			// close the connection after response
+			action = closeAfterReply
+			basicReq.BfeStatusCode = bfe_http.StatusInternalServerError
+			return
+		case bfe_module.BfeHandlerRedirect:
+			// ...
+```
+
+回调函数的添加实现(`AcceptFilter`示例)：
+
+```go
+// AddAcceptFilter adds accept filter to handler list.
+func (hl *HandlerList) AddAcceptFilter(f interface{}) error {
+	callback, ok := f.(func(session *bfe_basic.Session) int)
+	if !ok {
+		return fmt.Errorf("AddAcceptFilter():invalid callback func")
+	}
+
+	hl.handlers.PushBack(NewAcceptFilter(callback))
+	return nil
+}
+```
+
+上述的回调模型实现了模块可插拔，那么具体的功能模块该如何实现呢？我们继续来看。
+
+**模块**
+
+我们以非常重要的waf模块为例，深入研究一下模块内部的实现原理([WAF简介](https://zhuanlan.zhihu.com/p/97396469))。这部分内容可以按照以下3个部分进行梳理：
+
++ 模块配置
++ 回调的注册与实现
++ 模块状态
+
+waf模块配置示例：
+
+```json
+{
+    "Version": "2019-12-10184356",
+    "Config": {
+        "example_product": [
+            {
+                "Cond": "req_path_prefix_in(\"/rewrite\", false)",
+                "BlockRules": [
+	            "RuleBashCmd"
+                ]
+            }
+        ]
+    }
+}
+```
+
+大部分的模块功能都可以拆分为2部分，即：条件(`Cond`)、动作(`BlockRules`，在其它模块也叫`Actions`等)。那么，一个模块的逻辑可以描述为：如果命中条件，就执行动作。
+
+waf模块实现了`bfe_module.RequestFilter`回调：
+
+```go
+func (m *ModuleWaf) handleWaf(req *bfe_basic.Request) (int, *bfe_http.Response) {
+	// 获取RuleList
+	rules, ok := m.ruleTable.Search(req.Route.Product)
+	if !ok {
+		return bfe_module.BfeHandlerGoOn, nil
+	}
+	for _, rule := range *rules {
+		// 首先，判断条件是否命中
+		if !rule.Cond.Match(req) {
+			continue
+		}
+		m.state.CheckedReq.Inc(1)
+		// BlockRules - 拦截模式
+		for _, blockRule := range rule.BlockRules {
+			blocked, err := m.handler.HandleBlockJob(blockRule, req)
+			if err != nil {
+				m.state.BlockedRuleError.Inc(1)
+				log.Logger.Debug("ModuleWaf.handleWaf() block job err=%v, rule=%s", err, blockRule)
+				continue
+			}
+			if blocked {
+				req.ErrCode = ErrWaf
+				m.state.HitBlockedReq.Inc(1)
+				return bfe_module.BfeHandlerFinish, nil
+			}
+		}
+		// CheckRules - 观察模式
+		for _, checkRule := range rule.CheckRules {
+			// ...
+		}
+		break
+	}
+	return bfe_module.BfeHandlerGoOn, nil
+}
+```
+
+几个点：
+
++ 用到了我们之前介绍过的[条件表达式](#条件表达式)
++ waf规则的处理分为*拦截模式*(`BlockRules`)和*观察模式*(CheckRules)。这是因为waf规则上线通常需要先开启观察模式验证，后开启拦截模式拦截攻击流量。
++ waf模块状态`ModuleWafState`主要记录了各种规则命中的数据，用于统计。这个信息也非常重要，往往需要采集到后台进行统一监控。
+
+模块的注册是`bfe_module.BfeModule`接口中`Init`规定的，waf模块出了注册回调，还添加了监控。
+
+```go
+func (m *ModuleWaf) Init(cbs *bfe_module.BfeCallbacks, whs *web_monitor.WebHandlers, cr string) error {
+	// ...
+
+	// 回调注册
+	err = cbs.AddFilter(bfe_module.HandleFoundProduct, m.handleWaf)
+	if err != nil {
+		return fmt.Errorf("%s.Init(): AddFilter(m.handleWaf): %v", m.name, err)
+	}
+
+	err = web_monitor.RegisterHandlers(whs, web_monitor.WebHandleMonitor, m.monitorHandlers())
+	if err != nil {
+		return fmt.Errorf("%s.Init(): RegisterHandlers(m.monitorHandlers): %v", m.Name(), err)
+	}
+
+	// ...
+}
+```
 
 **实现细节**
 
@@ -133,7 +281,19 @@ func (t *HostTable) findHostRoute(host string) (route, error) {
 
 使用了一棵域名[前缀树](https://zhuanlan.zhihu.com/p/28891541)来查找，从根节点到叶子节点为一个完整域名。从根节点往下依次是各级[域名](https://baike.baidu.com/item/%E9%A1%B6%E7%BA%A7%E5%9F%9F%E5%90%8D/2152551)，到了叶子节点则是租户。
 
-查找算法：
+前缀树的结构：和普通的树区别在于节点的children使用了一个映射，key为前缀。
+
+```go
+type trieChildren map[string]*Trie
+
+type Trie struct {
+	Entry      interface{}
+	SplatEntry interface{} // to match xxx.xxx.*
+	Children   trieChildren
+}
+```
+
+根据完整域名(`path`)查找租户的算法：
 
 ```go
 func (t *Trie) Get(path []string) (entry interface{}, ok bool) {
@@ -190,9 +350,11 @@ func (t *HostTable) LookupCluster(req *bfe_basic.Request) error {
 
 ### 条件表达式
 
-参考章节：[BFE的路由转发机制—条件表达式](https://github.com/baidu/bfe-book/blob/version1/design/route/route.md)
-代码模块：`bfe_basic/condition`
-背景知识：[AST(抽象语法树)](https://juejin.cn/post/6844904035271573511)
+**准备**
+
++ 参考章节：[BFE的路由转发机制—条件表达式](https://github.com/baidu/bfe-book/blob/version1/design/route/route.md)
++ 代码模块：`bfe_basic/condition`
++ 背景知识：[AST(抽象语法树)](https://juejin.cn/post/6844904035271573511)
 
 **实现机制**
 
@@ -239,6 +401,35 @@ func Build(condStr string) (Condition, error) {
 
 + `parser`包*分析*部分的代码看起来像是基于`go`包改造的。
 + *条件原语*的实现：`condition.PrimitiveCond`又被拆分成`Matcher`和`Fetcher`的组合，它们分别负责参数的获取和匹配。这样可以方便将已有的对象迅速组合出新的原语。
+
+例如：
+
+```go
+// buildPrimitive builds primitive from PrimitiveCondExpr.
+// if failed, b.err is set to err, return Condition is nil
+// if success, b.err is nil
+func buildPrimitive(node *parser.CallExpr) (Condition, error) {
+	switch node.Fun.Name {
+	case "default_t":
+		return &DefaultTrueCond{}, nil
+	// ...
+	case "req_vip_in":
+		matcher, err := NewIpInMatcher(node.Args[0].Value)
+		if err != nil {
+			return nil, err
+		}
+		return &PrimitiveCond{
+			name:    node.Fun.Name,
+			node:    node,
+			fetcher: &VIPFetcher{},
+			matcher: matcher,
+		}, nil
+	case "req_vip_range":
+		// ...
+  }
+```
+
+有兴趣可以看看具体Matcher和Fetcher的实现。
 
 ### 规则
 

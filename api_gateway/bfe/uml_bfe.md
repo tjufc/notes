@@ -161,15 +161,20 @@ package bfe_server {
         Config bfe_conf.BfeConfig
         connWaitGroup sync.WaitGroup
         ServerConf *bfe_route.ServerDataConf
+        Modules *bfe_module.BfeModules
 
         Serve(l net.Listerner, ...)
         findProduct(req *Request) error
         findCluster(req *Request) error
+
+        RegisterModules(modules []string)
+        InitModules()
     }
     BfeServer "1" *--> "n" conn
     BfeServer *--> ReverseProxy
     BfeServer o--> bfe_module.BfeCallbacks
     BfeServer o--> bfe_route.ServerDataConf
+    BfeServer "1" *--> "n" bfe_module.BfeModule
 
     class conn {
         server *BfeServer
@@ -203,10 +208,16 @@ package bfe_http {
 
 
 package bfe_module {
+    interface BfeModule {
+        Name() string
+        Init(*BfeCallbacks, *web_monitor.WebHandlers, confRoot string)
+    }
+
     class BfeCallbacks {
         callbacks map[CallbackPoint]*HandlerList
 
         GetHandlerList(point CallbackPoint)
+        AddFilter(point CallbackPoint, f interface{})
     }
     BfeCallbacks --> CallbackPoint
     BfeCallbacks "1" o--> "n" HandlerList
@@ -275,6 +286,42 @@ package bfe_module {
         BfeHandlerRedirect
         BfeHandlerResponse
         BfeHandlerClose
+    }
+}
+
+
+package mod_waf {
+    package waf_rule {
+        interface waf_rule.WafRule {
+            Init() error
+            Check(req *RuleRequestInfo) bool
+        }
+        class waf_rule.WafRuleTable {
+            rules map[string]WafRule
+            GetRule(ruleName string) WafRule
+        }
+        waf_rule.WafRuleTable "1" o--> "n" waf_rule.WafRule
+    }
+
+    class mod_waf.ModuleWaf {
+        name string
+        conf *ConfModWaf
+        handler *wafHandler
+        state ModuleWafState
+        ruleTable *WarRuleTable
+        metrics metrics.Metrics
+
+        handleWaf(req *Request) (int, *Response)
+    }
+    mod_waf.ModuleWaf ..|> bfe_module.BfeModule
+    mod_waf.ModuleWaf ..|> bfe_module.RequestFilter
+    mod_waf.ModuleWaf o--> waf_rule.WafRuleTable
+    mod_waf.ModuleWaf o--> mod_waf.ModuleWafState
+
+    class mod_waf.ModuleWafState {
+        CheckedReq *metrics.Counter
+        HitBlockedReq  *metrics.Counter
+        ...
     }
 }
 
