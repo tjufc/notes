@@ -213,7 +213,7 @@ func (m *ModuleWaf) handleWaf(req *bfe_basic.Request) (int, *bfe_http.Response) 
 
 + 用到了我们之前介绍过的[条件表达式](#条件表达式)
 + waf规则的处理分为*拦截模式*(`BlockRules`)和*观察模式*(CheckRules)。这是因为waf规则上线通常需要先开启观察模式验证，后开启拦截模式拦截攻击流量。
-+ waf模块状态`ModuleWafState`主要记录了各种规则命中的数据，用于统计。这个信息也非常重要，往往需要采集到后台进行统一监控。
++ waf模块状态`ModuleWafState`主要记录了各种规则命中的数据，用于统计。这个信息也非常重要，往往需要采集到后台进行统一监控。详见[监控](#监控)一节。
 
 模块的注册是`bfe_module.BfeModule`接口中`Init`规定的，waf模块出了注册回调，还添加了监控。
 
@@ -522,7 +522,7 @@ func (m *Metrics) initMetrics(s interface{}) {
 + 接口路由基于2层map实现。第一层通过`WebHandlerType`进行枚举，第二层直接用key查询。
 + `RegisterHandler`接口实现回调注册。
 
-最后，我们来看一下`mod_waf`是如何依靠上述2个模块实现监控的。在[]()一节中我们知道`ModuleWafState`用于维护waf模块的内部状态，它分别关联了1个`Metrics`对象和全局`WebMonitor`对象。
+最后，我们来看一下`mod_waf`是如何依靠上述2个模块实现监控的。在[模块插件机制](#模块插件机制)一节中我们知道`ModuleWafState`用于维护waf模块的内部状态，它分别关联了1个`Metrics`对象和全局`WebMonitor`对象。
 
 定义模块自身的内部状态结构体：
 
