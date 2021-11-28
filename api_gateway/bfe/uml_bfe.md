@@ -290,6 +290,76 @@ package bfe_module {
 }
 
 
+package baidu_golib {
+    package metrics {
+        class metrics.Counter {
+            Get() int64
+            Set() int64
+        }
+        class metrics.Gauge {
+            Get() int64
+            Set() int64
+        }
+        class metrics.State {
+            Get() string
+            Set() string
+        }
+
+        class metrics.MetricsData {
+            Prefix string
+            GaugeData map[string]int64
+            CounterData map[string]int64
+            StateData map[string]string
+
+            Diff(last *MetricsData) *MetricsData
+        }
+
+        class metrics.Metrics {
+            metricStruct interface{}
+            counterMap map[string]*Counter
+            gaugeMap map[string]*Gauge
+            stateMap map[string]*State
+            metricsLast *MetricsData
+            metricsDiff *MetricsData
+
+            GetAll() *MetricsData
+            GetDiff() *MetricsData
+        }
+        metrics.Metrics "1" o--> "n" metrics.Counter
+        metrics.Metrics "1" o--> "n" metrics.Gauge
+        metrics.Metrics "1" o--> "n" metrics.State
+        metrics.Metrics --> metrics.MetricsData
+    }
+
+    package web_monitor {
+        enum web_monitor.WebHandlerType {
+            WebHandleMonitor
+            WebHandleReload
+            WebHandlePprof
+        }
+        class web_monitor.WebHandlerMap {
+            handlers map[string]interface{}
+        }
+        class web_monitor.WebHandlers {
+            handlers map[WebHandlerType]*WebHandlerMap
+
+            RegisterHandler(hType WebHandlerType, command string, f interface{})
+            GetHandler(hType WebHandlerType, command string)
+        }
+        web_monitor.WebHandlers --> web_monitor.WebHandlerType
+        web_monitor.WebHandlers --> web_monitor.WebHandlerMap
+
+        class web_monitor.MonitorServer {
+            port int
+            webHandlers *WebHandlers
+
+            webHandler(w http.ResponseWriter, r *http.Request)
+        }
+        web_monitor.MonitorServer o--> web_monitor.WebHandlers
+    }
+}
+
+
 package mod_waf {
     package waf_rule {
         interface waf_rule.WafRule {
@@ -312,17 +382,51 @@ package mod_waf {
         metrics metrics.Metrics
 
         handleWaf(req *Request) (int, *Response)
+        monitorHandlers() map[string]interface{}
     }
     mod_waf.ModuleWaf ..|> bfe_module.BfeModule
     mod_waf.ModuleWaf ..|> bfe_module.RequestFilter
-    mod_waf.ModuleWaf o--> waf_rule.WafRuleTable
     mod_waf.ModuleWaf o--> mod_waf.ModuleWafState
+    mod_waf.ModuleWaf o--> mod_waf.WarRuleTable
+    mod_waf.ModuleWaf ..> mod_waf.wafRule
+    mod_waf.ModuleWaf o--> mod_waf.wafHandler
+    mod_waf.ModuleWaf --> metrics.Metrics
+    mod_waf.ModuleWaf ..> web_monitor.MonitorServer
 
     class mod_waf.ModuleWafState {
         CheckedReq *metrics.Counter
         HitBlockedReq  *metrics.Counter
         ...
     }
+
+    class mod_waf.wafRule {
+        Cond condition.Condition
+        BlockRules []string
+        CheckRules []string
+    }
+
+    class mod_waf.WarRuleTable {
+        productRule map[string][]*wafRule
+        Search(product string) []*wafRule
+    }
+    mod_waf.WarRuleTable "1" o--> "n" mod_waf.wafRule
+
+    class mod_waf.wafJob {
+        Rule string
+        Type string
+        Hit bool
+        RuleRequest *waf_rule.RuleRequestInfo
+    }
+
+    class mod_waf.wafHandler {
+        wafLogger *wafLogger
+        wafTable *waf_rule.WafRuleTable
+
+        HandleBlockJob(rule string, req *Request)
+        HandleCheckJob(rule string, req *Request)
+    }
+    mod_waf.wafHandler "1" o--> "n" waf_rule.WafRuleTable
+    mod_waf.wafHandler --> mod_waf.wafJob
 }
 
 

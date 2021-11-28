@@ -1,21 +1,17 @@
 
 - [API Gateway](#api-gateway)
-  - [概述](#概述)
-  - [典型案例](#典型案例)
-  - [百度BFE](#百度bfe)
-    - [概述](#概述-1)
-    - [源码结构梳理](#源码结构梳理)
-    - [模块插件机制](#模块插件机制)
-    - [流量转发](#流量转发)
-    - [条件表达式](#条件表达式)
-    - [规则](#规则)
-    - [插件机制](#插件机制)
-    - [限流](#限流)
-    - [监控 & 日志](#监控--日志)
-    - [配置管理](#配置管理)
-  - [美团](#美团)
-    - [概述](#概述-2)
-  - [Traefik](#traefik)
+	- [概述](#概述)
+	- [典型案例](#典型案例)
+	- [百度BFE](#百度bfe)
+		- [概述](#概述-1)
+		- [源码结构梳理](#源码结构梳理)
+		- [模块插件机制](#模块插件机制)
+		- [流量转发](#流量转发)
+		- [条件表达式](#条件表达式)
+		- [监控](#监控)
+	- [美团](#美团)
+		- [概述](#概述-2)
+	- [Traefik](#traefik)
 
 # API Gateway
 
@@ -32,9 +28,7 @@
 
 ## 典型案例
 
-+ 百度
-  + [BFE](https://github.com/bfenetworks/bfe)
-  + 百度网盘API Gateway
++ 百度[BFE](https://github.com/bfenetworks/bfe)
 + 美团
   + [Oceanus](https://tech.meituan.com/2018/09/06/oceanus-custom-traffic-routing.html)
   + [Shepherd](https://mp.weixin.qq.com/s/iITqdIiHi3XGKq6u6FRVdg)
@@ -97,7 +91,7 @@
 BFE通过*回调*来执行插件功能。
 
 + 回调框架(BfeCallbacks)
-+ 回调点(CallbackPoint)
++ 回调点(CallbackPoint)：单个请求维度定义了9个回调点。
 + 回调链(HandlerList)：实现上是个链表。
 + 回调(接口)类型：`RequestFilter`等5个回调接口。
 + 回调返回类型(没定义，暂且称之为HandlerReturnType)
@@ -245,6 +239,7 @@ func (m *ModuleWaf) Init(cbs *bfe_module.BfeCallbacks, whs *web_monitor.WebHandl
 **实现细节**
 
 + `bfe_module.HandlerList`内表示回调类型的类型成员事实上并没有什么用。回调接口类型是通过`switch type {}`动态判断的。
++ `mod_waf.wafRule`和`mod_waf.WafRule`的区别：命名接近。前者负责检查条件是否命中，后者负责实现动作执行。
 
 ### 流量转发
 
@@ -391,7 +386,26 @@ func Build(condStr string) (Condition, error) {
 + 词法解析&语法解析，生成语法树。以下简称*分析*
 + 构建执行树。以下简称*生成*
 
-这棵AST的节点被分为了3类：
+其中，构建执行树(`build(node)`)的实现：
+
+```go
+func build(node parser.Node) (Condition, error) {
+	switch n := node.(type) {
+	case *parser.CallExpr:
+		return buildPrimitive(n)
+	case *parser.UnaryExpr:
+		return buildUnary(n)
+	case *parser.BinaryExpr:
+		return buildBinary(n)
+	case *parser.ParenExpr:
+		return build(n.X)
+	default:
+		return nil, fmt.Errorf("unsupported node %s", node)
+	}
+}
+```
+
+可见，这棵AST的节点被分为了3类：
 
 + **叶子节点——原语**：这类节点包含可以直接执行的*条件原语*。*分析*环节中将节点实例化为`parser.CallExpr`类型；*生成*环节实例化为`condition.PrimitiveCond`类型。
 + **叶子结点—一元运算**：这类节点需要在*条件原语*的基础上，进行一次一元逻辑运算，例如：`非`。*分析*环节对应`parser.UnaryExpr`，*生成*环节对应`condition.UnaryCond`。
@@ -431,41 +445,114 @@ func buildPrimitive(node *parser.CallExpr) (Condition, error) {
 
 有兴趣可以看看具体Matcher和Fetcher的实现。
 
-### 规则
+### 监控
 
-规则示例：以下是一个rewrite配置。
-```json
-{
-    "Version": "1",
-    "Config": {
-        "example_product": [
-            {
-                "Cond": "req_path_prefix_in(\"/rewrite\", false)",
-                "Actions": [
-                    {
-                        "Cmd": "PATH_PREFIX_ADD",
-                        "Params": [
-                            "/bfe/"
-                        ]
-                    }
-                ],
-                "Last": true
-            }
-        ]
-    }
+**准备**
+
++ 参考章节：
+  + [监控机制](https://github.com/baidu/bfe-book/blob/version1/design/monitor/monitor.md)
+  + [如何开发BFE扩展模块](https://github.com/baidu/bfe-book/blob/version1/design/monitor/monitor.md)
++ go [atomic包](https://juejin.cn/post/6844904053042839560)
++ go反射
+
+本节我们仍旧以`mod_waf`的实现为例，进行学习。
+
+**实现机制**
+
+[监控机制](https://github.com/baidu/bfe-book/blob/version1/design/monitor/monitor.md)一节一共讨论了2种监控方法：
+
++ 基于日志监控：
+  + 打印日志，监控日志内容。
+  + 优点：信息完善。缺点：耗资源 -> IO操作，读取、解析、匹配...
++ 维护内部状态：每秒处理请求数、并发连接数、命中策略数...
+
+bfe的服务状态信息(如上)，是基于内存进行统计(metrics)，并依赖一个web server(后台协程)对外暴露。这就引出了本节讨论的2个主要模块`metrics`和`web_monitor`。
+
+首先，`metrics`实现了基于内存的服务状态存储和计算
+
++ 服务状态分为`Counter`/`Gauge`/`State`三类，它们使用go语言的`atomic`机制保证操作的原子性。
++ `MetricsData`基于通过互斥锁(`Mutex`)实现了`Diff`接口，用于计算每个`interval`之间的数据变化。例如：最近20s内的请求pv。
++ `Metrics`对象负责实现服务状态的UI。用户可以基于上述3类服务状态定义任意形式的结构体(即`metricStruct`)，`Metrics`内部通过go反射来解析这个结构体。
+
+这段代码展示了`Metrics`是如何利用go反射，将用户定义的任意由`Counter/Gauge/State`三类状态组合成的结构体`metricStruct`，解析成内部数据结构的。
+
+```go
+// initMetrics initializes metrics struct
+func (m *Metrics) initMetrics(s interface{}) {
+	m.counterMap = make(map[string]*Counter)
+	m.gaugeMap = make(map[string]*Gauge)
+	m.stateMap = make(map[string]*State)
+
+	// 利用反射，获取s中变量的type和value
+	t := reflect.TypeOf(s).Elem()
+	v := reflect.ValueOf(s).Elem()
+
+	// 对每个变量进行遍历。实际上，每个变量即时用户想要维护的一个内部状态。
+	for i := 0; i < v.NumField(); i++ {
+		field := t.Field(i)
+		value := v.Field(i)
+
+		// track created counters
+		name := m.convert(field.Name)
+
+		// 对s中变量类型进行枚举，它必然是Counter/Gauge/State
+		switch mType := field.Type.Elem().Name(); mType {
+		case TypeState:
+			v := new(State)
+			m.stateMap[name] = v
+			value.Set(reflect.ValueOf(v))
+
+		case TypeCounter:
+			v := new(Counter)
+			m.counterMap[name] = v
+			value.Set(reflect.ValueOf(v))
+
+		case TypeGauge:
+			v := new(Gauge)
+			m.gaugeMap[name] = v
+			value.Set(reflect.ValueOf(v))
+		}
+	}
 }
 ```
 
-> 上述配置为产品线example_product中增加了一个规则：对满足条件"Cond"的请求，执行"Actions"动作（包含动作名"Cmd"和对应的参数），如果"Last"为true，停止执行后续动作，否则继续匹配下一条规则。
-> 最终，该规则将修改Path为/rewrite开头的请求，为其增加路径前缀/bfe/，也就是将Path从/rewrite变为/bfe/rewrite。
+其次，`web_monitor`实现了对外暴露数据的后台web server,比较简单：
 
-### 插件机制
++ 基于go标准http包，其中`webHandler`是`http.Handler`接口的具体实现。
++ 接口路由基于2层map实现。第一层通过`WebHandlerType`进行枚举，第二层直接用key查询。
++ `RegisterHandler`接口实现回调注册。
 
-### 限流
+最后，我们来看一下`mod_waf`是如何依靠上述2个模块实现监控的。在[]()一节中我们知道`ModuleWafState`用于维护waf模块的内部状态，它分别关联了1个`Metrics`对象和全局`WebMonitor`对象。
 
-### 监控 & 日志
+定义模块自身的内部状态结构体：
 
-### 配置管理
+```go
+type ModuleWafState struct {
+	CheckedReq *metrics.Counter // record how many requests check waf rule
+
+	HitBlockedReq  *metrics.Counter // record how many requests check waf rule
+	HitCheckedRule *metrics.Counter // hit checked rule
+
+	BlockedRuleError *metrics.Counter //err times of check blocked rule
+	CheckedRuleError *metrics.Counter // err times of check checked rule
+}
+```
+
+实现暴露状态数据的回调接口，并在`Init`接口中向`WebMonitor`注册：
+
+```go
+func (m *ModuleWaf) Init(cbs *bfe_module.BfeCallbacks, whs *web_monitor.WebHandlers, cr string) error {
+	// ...
+
+	// 监控相关
+	err = web_monitor.RegisterHandlers(whs, web_monitor.WebHandleMonitor, m.monitorHandlers())
+	if err != nil {
+		return fmt.Errorf("%s.Init(): RegisterHandlers(m.monitorHandlers): %v", m.Name(), err)
+	}
+
+	// ...
+}
+```
 
 ## 美团
 
