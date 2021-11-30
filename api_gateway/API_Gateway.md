@@ -9,6 +9,7 @@
 		- [流量转发](#流量转发)
 		- [条件表达式](#条件表达式)
 		- [监控](#监控)
+		- [日志](#日志)
 	- [美团](#美团)
 		- [概述](#概述-2)
 	- [Traefik](#traefik)
@@ -73,6 +74,7 @@
 + `BfeServer`通过`WaitGroup`控制请求处理协程，并实现优雅重启。
 + `Serve()`方法负责执行整个请求处理及响应。其中，`conn`对象负责实现基础网络功能，`ReverseProxy`对象负责实现路由、负载均衡等核心功能。完整流程详见[请求处理流程及响应](https://github.com/baidu/bfe-book/blob/version1/implementation/life_of_a_request/life_of_a_request.md)一节，代码参见`ReverseProxy.ServeHTTP()`。
 + `BfeServer`依赖回调框架能力(`bfe_module`包)，注册并顺序执行回调链，实现请求的定制化处理。
++ `bfe_basic.Request`和`bfe_basic.Response`：相当于请求上下文，特别是前者，在其它的web框架中我们也可以看到命名类似于*Context*的对象。它们贯穿了整个`conn`的生命周期，我们在这个协程的任何地方访问它都是最低成本的。
 
 ### 模块插件机制
 
@@ -553,6 +555,132 @@ func (m *ModuleWaf) Init(cbs *bfe_module.BfeCallbacks, whs *web_monitor.WebHandl
 	// ...
 }
 ```
+
+### 日志
+
+**准备**
+
++ 参考章节：[日志机制](https://github.com/baidu/bfe-book/blob/version1/design/log/log.md)
+
+**实现机制**
+
+首先，BFE对于不同用途的日志做出明确区分，这点是值得重视的。日志本身实现难度并不大，但是很多业务中的日志却是五花八门，个人觉得大多时候都是设计上的懒惰。
+
+我们主要看 *访问日志(access log)*。它被实现为一个模块`mod_access`，实现方法我们已经在`mod_waf`介绍过了，它们大体相同。这里直接看回调代码：
+
+```go
+func (m *ModuleAccess) requestLogHandler(req *bfe_basic.Request, res *bfe_http.Response) int {
+	byteStr := bytes.NewBuffer(nil)
+
+	// 这一段是在拼装access日志
+	for _, item := range m.reqFmts {
+		switch item.Type {
+		case FormatString:
+			byteStr.WriteString(item.Key)
+		case FormatTime:
+			onLogFmtTime(m, byteStr)
+		default:
+			// fmtHandlerTable这个表里存储了item.Type和对应信息的获取方法
+			handler, found := fmtHandlerTable[item.Type]
+			if found {
+				h := handler.(func(*ModuleAccess, *LogFmtItem, *bytes.Buffer,
+					*bfe_basic.Request, *bfe_http.Response) error)
+				h(m, &item, byteStr, req, res)
+			}
+		}
+	}
+
+	// 这里是实际打印日志，详见log4go
+	m.logger.Info(byteStr.String())
+
+	return bfe_module.BfeHandlerGoOn
+}
+```
+
+其次，我们简单学习一下*log4go*这个包。代码结构如下：
+
+<div align=center>
+  <img src="./bfe/uml_log4go.png">
+  <div style="font-size:14px">log4go代码接哦股</div>
+</div>
+
+log4go的主要设计是基于`chan`来异步写日志，即：用户只负责向`chan`中分发日志(消息)，log4go通过后台协程去消费这个`chan`中的数据，串行地向日志文件中进行写操作。
+
+实现上，核心接口是`LogWriter`和`LogCloser`，前者负责用户*写日志*操作，后者负责关闭日志。
+
+`TimeFileLogWriter`是一个具体的实现。首先看下初始化消费协程：
+
+```go
+func NewTimeFileLogWriter(fname string, when string, backupCount int, enableCompress bool) *TimeFileLogWriter {
+	// ...
+
+	// 开启后台协程，真正向文件中写入日志。这样所有写入操作都是串行的。
+	go func() {
+		defer func() {
+			if w.file != nil {
+				w.file.Close()
+			}
+		}()
+
+		for rec := range w.rec {
+			// 检查一下消息是否为终止信号
+			if w.EndNotify(rec) {
+				return
+			}
+
+			// 日志切分处理
+			if w.shouldRollover() {
+				if err := w.intRotate(); err != nil {
+					fmt.Fprintf(os.Stderr, "NewTimeFileLogWriter(%q): %s\n", w.filename, err)
+					continue
+				}
+			}
+
+			// Perform the write
+			var err error
+			if rec.Binary != nil {
+				_, err = w.file.Write(rec.Binary)
+			} else {
+				_, err = fmt.Fprint(w.file, FormatLogRecord(w.format, rec))
+			}
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "NewTimeFileLogWriter(%q): %s\n", w.filename, err)
+			}
+		}
+	}()
+
+	return w
+}
+```
+
+终止信号是什么呢？我们先看下`LogWrite`接口中`Close`，以及`LogClose`接口的具体实现：
+
+```go
+// Close waits for dump all log and close chan
+func (w *TimeFileLogWriter) Close() {
+	w.WaitForEnd(w.rec)
+	close(w.rec)
+}
+
+// notyfy the logger log to end
+func (lc *LogCloser) EndNotify(lr *LogRecord) bool {
+	if lr == nil && lc.IsEnd != nil {
+		lc.IsEnd <- true
+		return true
+	}
+	return false
+}
+
+// add nil to end of res and wait that EndNotify is call
+func (lc *LogCloser) WaitForEnd(rec chan *LogRecord) {
+	rec <- nil
+	if lc.IsEnd != nil {
+		<-lc.IsEnd
+	}
+}
+```
+
+不难发现，实际上是传入一个`nil`对象(`LogRecord`类型)。后台协程通过`EndNotify`获取到`nil`终止信号，向`lc.IsEnd`通道内发出终止标记，并直接返回结束；主协程通过`WairForEnd`阻塞在`<-lc.IsEnd`这里，一旦收到后台协程发出的终止标记后，即表示剩余日志完成处理，关闭日志通道`w.rec`。
 
 ## 美团
 
