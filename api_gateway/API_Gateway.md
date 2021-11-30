@@ -601,14 +601,14 @@ func (m *ModuleAccess) requestLogHandler(req *bfe_basic.Request, res *bfe_http.R
 
 <div align=center>
   <img src="./bfe/uml_log4go.png">
-  <div style="font-size:14px">log4go代码接哦股</div>
+  <div style="font-size:14px">log4go代码结构</div>
 </div>
 
 log4go的主要设计是基于`chan`来异步写日志，即：用户只负责向`chan`中分发日志(消息)，log4go通过后台协程去消费这个`chan`中的数据，串行地向日志文件中进行写操作。
 
 实现上，核心接口是`LogWriter`和`LogCloser`，前者负责用户*写日志*操作，后者负责关闭日志。
 
-`TimeFileLogWriter`是一个具体的实现。首先看下初始化消费协程：
+`TimeFileLogWriter`是一个具体的实现。首先看下初始化消费协程的逻辑：
 
 ```go
 func NewTimeFileLogWriter(fname string, when string, backupCount int, enableCompress bool) *TimeFileLogWriter {
