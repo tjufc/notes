@@ -42,3 +42,7 @@
 + `methodTree`对象：负责实现路由管理的核心功能。TODO源码学习
 + `RouterGroup`对象 && `IRoutes`接口：负责定义和实现`Engine`路由注册部分的UI。它关联了`Engine`对象，即使用了`methodTrees`提供的机制。
 + `HandleFunc`接口：用户实现请求处理逻辑的统一UI，即 gin*中间件(middleware)*。它在框架内被聚合成`HandlersChain`(数组)，绑定到路由上。
+
+核心机制：
+
++ 路由：[一篇不错的介绍](https://www.liwenzhou.com/posts/Go/read_gin_sourcecode/)

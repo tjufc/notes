@@ -9,7 +9,7 @@
 # beego
 
 我们来学习**beego**框架。[源码注释](https://github.com/tjufc/beego/tree/note_master)
-[文档](https://beego.me/docs/intro/)
+[文档](https://beego.vip/docs/intro/)
 
 ## hello world
 

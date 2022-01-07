@@ -31,7 +31,7 @@ note top: 请求上下文的接收、存储、读写、渲染
 gin.Context --> gin.ResponseWriter
 gin.Context --> http.Request
 gin.Context ..> gin.Render
-gin.Context "n" <--* "1" gin.Engine
+gin.Context "n" <--o "1" gin.Engine
 
 
 
@@ -44,7 +44,7 @@ gin.HandlerFunc ..> gin.Context
 class gin.HandlersChain {
     Last() HandlerFunc
 }
-gin.HandlersChain "m" *--> "n" gin.HandlerFunc
+gin.HandlersChain "m" --> "n" gin.HandlerFunc
 
 
 
@@ -76,12 +76,14 @@ interface http.Handler {
 }
 
 class gin.Engine {
+    trees methodTrees
+
     addRoute(method, path string, handlers HandlersChain)
     handleHTTPRequest(c *Context)
 }
 gin.Engine --|> gin.RouterGroup
 gin.Engine ..|> http.Handler
-gin.Engine *--> gin.methodTrees
+gin.Engine o--> gin.methodTrees
 gin.Engine ..> gin.node
 
 
@@ -90,18 +92,20 @@ class gin.node {
     addRoute(path string, handlers HandlersChain)
     getValue(path string, params *Params...)
 }
-gin.node ..> gin.HandlersChain
+gin.node o--> gin.HandlersChain
 
 class gin.methodTree {
     method string
     root *node
 }
-gin.methodTree "1" *--> "n" gin.node
+gin.methodTree o--> gin.node
 
 class gin.methodTrees {
+    t []methodTree
+
     get(method string) *node
 }
-gin.methodTrees "1" *--> "n" gin.methodTree
+gin.methodTrees "1" o--> "n" gin.methodTree
 
 
 @enduml

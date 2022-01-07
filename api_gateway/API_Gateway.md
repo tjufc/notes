@@ -10,6 +10,7 @@
 		- [条件表达式](#条件表达式)
 		- [监控](#监控)
 		- [日志](#日志)
+		- [其它](#其它)
 	- [美团](#美团)
 		- [概述](#概述-2)
 	- [Traefik](#traefik)
@@ -681,6 +682,55 @@ func (lc *LogCloser) WaitForEnd(rec chan *LogRecord) {
 ```
 
 不难发现，实际上是传入一个`nil`对象(`LogRecord`类型)。后台协程通过`EndNotify`获取到`nil`终止信号，向`lc.IsEnd`通道内发出终止标记，并直接返回结束；主协程通过`WairForEnd`阻塞在`<-lc.IsEnd`这里，一旦收到后台协程发出的终止标记后，即表示剩余日志完成处理，关闭日志通道`w.rec`。
+
+### 其它
+
++ 优雅重启
+  + 向监听协程发出close信号，`bfe_server.Serve`捕获信号后等待超时并终止`Accept`。
+  + 开启同步协程，等待所有连接的处理协程结束(使用`WaitGroup`)，然后发出结束通知；同时开启超时协程(使用`time.After`)。
+  + 循环监听同步协程和超时协程，直到有一个发生后，结束服务。
+
+```go
+// ShutdownHandler is signal handler for QUIT
+func (srv *BfeServer) ShutdownHandler(sig os.Signal) {
+	shutdownTimeout := srv.Config.Server.GracefulShutdownTimeout
+	log.Logger.Info("get signal %s, graceful shutdown in %ds", sig, shutdownTimeout)
+
+	// notify that server is in graceful shutdown state
+	close(srv.CloseNotifyCh)
+
+	// close server listeners
+	srv.closeListeners()
+
+	// waits server conns to finish
+	connFinCh := make(chan bool)
+	go func() {
+		srv.connWaitGroup.Wait()
+		connFinCh <- true
+	}()
+
+	shutdownTimer := time.After(time.Duration(shutdownTimeout) * time.Second)
+
+Loop:
+	for {
+		select {
+		// waits server conns to finish
+		case <-connFinCh:
+			log.Logger.Info("graceful shutdown success.")
+			break Loop
+
+		// wait for shutdown timeout
+		case <-shutdownTimer:
+			log.Logger.Info("graceful shutdown timeout.")
+			break Loop
+		}
+	}
+
+	// shutdown server
+	log.Logger.Close()
+	os.Exit(0)
+}
+```
 
 ## 美团
 
